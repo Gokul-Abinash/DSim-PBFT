@@ -1,0 +1,7 @@
+[Node3] Loading honest protocol
+Node Node3 behavior: honest
+[8:08:19 PM.709] Node3 - INIT - Node initialized as Node3, f=2 
+PBFT Node started at ID=Node3, PORT=3003
+Node Node3 behavior: honest
+[8:08:19 PM.810] Node3 - INIT - Node initialized as Node3, f=2 
+Server listening on port 3003
