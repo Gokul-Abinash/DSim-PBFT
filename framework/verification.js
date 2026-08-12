@@ -16,8 +16,8 @@ async function collectNodeData() {
     const { ip, port } = nodeObj[nodeId];
     
     try {
-      const commitResponse = await axios.get(`http://${ip}:${port}/api/pbft-commit-log`, { timeout: 4000 });
-      const logResponse = await axios.get(`http://${ip}:${port}/api/pbft-log`, { timeout: 4000 });
+      const commitResponse = await axios.get(`http://${ip}:${port}/api/pbft-commit-log`, { timeout: 3000 });
+      const logResponse = await axios.get(`http://${ip}:${port}/api/pbft-log`, { timeout: 3000 });
       
       nodeData.push({
         port,
@@ -34,7 +34,8 @@ async function collectNodeData() {
         nodeId,
         commits: [],
         logs: [],
-        status: 'failed'
+        status: 'failed',
+        error: error.message
       });
     }
   }
@@ -79,7 +80,10 @@ function verifyAgreement(honestNodes, testData) {
   const minLength = Math.min(...commitSequences.map(seq => seq.length));
   
   if (minLength === 0) {
-    return { passed: false, details: "No transactions committed by honest nodes" };
+    return { 
+      passed: false, 
+      details: "No transactions committed yet. (Did you run 'bash dsim-cli.sh test' first?)" 
+    };
   }
   
   const commonPrefixes = commitSequences.map(seq => seq.slice(0, minLength));
@@ -108,13 +112,44 @@ async function main() {
     const nodeData = await collectNodeData();
     
     const runningNodes = nodeData.filter(node => node.status === 'running');
+    const failedNodes = nodeData.filter(node => node.status === 'failed');
     const honestNodes = filterHonestNodes(runningNodes, byzantineConfig);
     
-    console.log(`\nCluster Status: ${runningNodes.length}/${nodeData.length} nodes running (${honestNodes.length} honest)\n`);
+    // Per-machine breakdown
+    const machineGroups = {};
+    nodeData.forEach(n => {
+      if (!machineGroups[n.ip]) machineGroups[n.ip] = { running: 0, total: 0, failedNodes: [] };
+      machineGroups[n.ip].total++;
+      if (n.status === 'running') {
+        machineGroups[n.ip].running++;
+      } else {
+        machineGroups[n.ip].failedNodes.push(`${n.nodeId}:${n.port}`);
+      }
+    });
+
+    console.log(`\n--- Per-Server Node Health Breakdown ---`);
+    Object.entries(machineGroups).forEach(([ip, stats]) => {
+      const statusIcon = stats.running === stats.total ? '✅' : stats.running > 0 ? '⚠️ ' : '❌';
+      console.log(`${statusIcon} Server ${ip}: ${stats.running}/${stats.total} nodes online`);
+      if (stats.failedNodes.length > 0) {
+        console.log(`   Offline: ${stats.failedNodes.join(', ')}`);
+      }
+    });
+
+    const totalNodes = nodeData.length;
+    const f = Math.floor((totalNodes - 1) / 3);
+    const requiredQuorum = 2 * f + 1;
+
+    console.log(`\nCluster Status: ${runningNodes.length}/${totalNodes} nodes running (${honestNodes.length} honest)`);
+    console.log(`PBFT Quorum Requirement: Requires >= ${requiredQuorum} active nodes (2f+1) to reach consensus (f=${f}).`);
     
+    if (runningNodes.length < requiredQuorum) {
+      console.log(`\n⚠️  WARNING: Only ${runningNodes.length} nodes are active! With N=${totalNodes}, PBFT requires at least ${requiredQuorum} live nodes to achieve consensus. Please start the offline nodes on the remaining servers.`);
+    }
+
     const agreement = verifyAgreement(honestNodes, testData);
     
-    console.log(`${agreement.passed ? '✅' : '❌'} Agreement: ${agreement.passed ? 'PASS' : 'FAIL'}`);
+    console.log(`\n${agreement.passed ? '✅' : '❌'} Agreement: ${agreement.passed ? 'PASS' : 'FAIL'}`);
     console.log(`   ${agreement.details}`);
     
     console.log(`\nSample Node Commit State:`);
